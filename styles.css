@@ -1,0 +1,241 @@
+/* ── HIDE X.COM BEHIND OVERLAY ─────────────────────────────── */
+html, body {
+  background: #000 !important;
+  /* No overflow:hidden — X needs to scroll in the background to load more tweets */
+}
+body > *:not(#mx-overlay) {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* ── FULL-SCREEN OVERLAY ────────────────────────────────────── */
+#mx-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  overflow: hidden;
+  font-family: "Courier New", Courier, monospace;
+  background: #000;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 2px,
+    rgba(0, 18, 0, 0.16) 2px,
+    rgba(0, 18, 0, 0.16) 3px
+  );
+}
+
+/* ── BACKGROUND RAIN CANVAS ─────────────────────────────────── */
+#mx-rain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.42;
+}
+
+/* ── TWEET CANVAS ───────────────────────────────────────────── */
+#mx-tweets {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* ── MEDIA VIEWER OVERLAY ───────────────────────────────────── */
+#mx-viewer {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+#mx-viewer-box {
+  background: rgba(0, 10, 3, 0.97);
+  border: 1px solid rgba(0, 220, 70, 0.5);
+  border-radius: 6px;
+  padding: 14px;
+  max-width: min(680px, 90vw);
+  cursor: default;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 0 40px rgba(0, 180, 60, 0.25);
+}
+#mx-viewer-box img,
+#mx-viewer-box video {
+  max-width: 100%;
+  max-height: 65vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  display: block;
+  border-radius: 3px;
+}
+#mx-viewer-tweet {
+  color: #44dd66;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+  border-top: 1px solid rgba(0, 180, 60, 0.3);
+  padding-top: 10px;
+}
+
+/* ── COMMENT VIEWER BOX ─────────────────────────────────────── */
+#mx-cmt-box {
+  background: rgba(0, 10, 3, 0.97);
+  border: 1px solid rgba(0, 220, 70, 0.5);
+  border-radius: 6px;
+  padding: 14px;
+  width: min(580px, 88vw);
+  max-height: 72vh;
+  cursor: default;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 0 40px rgba(0, 180, 60, 0.25);
+}
+#mx-cmt-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 4px;
+  color: #44dd66;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 12px;
+}
+#mx-cmt-list::-webkit-scrollbar { width: 4px; }
+#mx-cmt-list::-webkit-scrollbar-track { background: transparent; }
+#mx-cmt-list::-webkit-scrollbar-thumb {
+  background: rgba(0, 200, 60, 0.4);
+  border-radius: 2px;
+}
+.mx-cmt-reply {
+  color: #44dd66;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+  border-bottom: 1px solid rgba(0, 180, 60, 0.15);
+  padding-bottom: 6px;
+}
+.mx-cmt-handle {
+  color: #00ff99;
+  font-weight: bold;
+}
+
+/* ── COMPOSE BOX ────────────────────────────────────────────── */
+#mx-compose-box {
+  background: rgba(0, 10, 3, 0.97);
+  border: 1px solid rgba(0, 220, 70, 0.5);
+  border-radius: 6px;
+  padding: 14px;
+  width: min(520px, 88vw);
+  cursor: default;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 0 40px rgba(0, 180, 60, 0.25);
+}
+#mx-compose-area,
+#mx-search-input {
+  background: rgba(0, 20, 8, 0.9);
+  border: 1px solid rgba(0, 200, 60, 0.4);
+  border-radius: 4px;
+  color: #44dd66;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 13px;
+  padding: 8px;
+  resize: none;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+#mx-compose-area { min-height: 80px; }
+#mx-compose-area:focus,
+#mx-search-input:focus {
+  border-color: rgba(0, 255, 80, 0.7);
+  box-shadow: 0 0 8px rgba(0, 220, 60, 0.3);
+}
+#mx-compose-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+#mx-compose-counter {
+  color: rgba(0, 200, 60, 0.6);
+  font-family: "Courier New", Courier, monospace;
+  font-size: 12px;
+}
+#mx-compose-send,
+#mx-cmt-reply-btn {
+  background: rgba(0, 30, 10, 0.8);
+  border: 1px solid rgba(0, 220, 70, 0.6);
+  color: rgba(0, 230, 70, 0.9);
+  font-family: "Courier New", Courier, monospace;
+  font-size: 13px;
+  padding: 4px 16px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+#mx-compose-send:hover,
+#mx-cmt-reply-btn:hover {
+  background: rgba(0, 60, 20, 0.9);
+  color: #fff;
+  border-color: rgba(0, 255, 80, 0.9);
+}
+#mx-compose-send:disabled { opacity: 0.4; cursor: default; }
+#mx-compose-status {
+  color: rgba(0, 200, 60, 0.7);
+  font-family: "Courier New", Courier, monospace;
+  font-size: 11px;
+  min-height: 14px;
+}
+#mx-cmt-reply-btn { align-self: flex-start; }
+
+/* ── SEARCH BANNER ──────────────────────────────────────────── */
+#mx-search-banner {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  background: rgba(0, 20, 8, 0.88);
+  border: 1px solid rgba(0, 220, 70, 0.5);
+  border-radius: 4px;
+  color: #44dd66;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 11px;
+  padding: 4px 12px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ── FULLSCREEN BUTTON ──────────────────────────────────────── */
+#mx-fs-btn {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 2147483647;
+  background: rgba(0, 30, 10, 0.6);
+  border: 1px solid rgba(0, 220, 70, 0.6);
+  color: rgba(0, 230, 70, 0.9);
+  font-size: 15px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0;
+  line-height: 1;
+  font-family: inherit;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+#mx-fs-btn:hover {
+  background: rgba(0, 60, 20, 0.8);
+  color: #fff;
+  border-color: rgba(0, 255, 80, 0.9);
+}
