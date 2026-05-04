@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Matrix X",
-  "version": "1.2",
+  "version": "2.0",
   "description": "Transform X.com into the Matrix. Live tweets stream as glowing green code across a digital void. Jack into the simulation.",
   "icons": {
     "16":  "icon16.png",

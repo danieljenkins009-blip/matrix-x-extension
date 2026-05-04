@@ -1,4 +1,4 @@
-console.log("MATRIX X v1.2 loaded");
+console.log("MATRIX X v2.0 loaded");
 
 // ─── CLEANUP ──────────────────────────────────────────────────────────────────
 const _old = document.getElementById("mx-overlay");
@@ -23,24 +23,30 @@ const GLYPHS = "ｦｧｨｩｪｫｬｭｮｯｱｲｳｴｵｶｷｸｹｺｻ�
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 let orderedTweets = [];
-let scrollIndex   = 0;
-let rows          = [];
-let animPaused      = false;
-let viewerOpen      = false;
-let cursorX         = -1;
-let cursorY         = -1;
-let selectedRowIdx  = -1;  // which row is keyboard-selected (-1 = none)
-let capturedAuth    = null;   // { auth: string, csrf: string }
-const queryIds      = {};     // favorite, unfavorite, retweet, unretweet, tweetDetail, createTweet, searchTimeline
-let commentBackdrop  = null;   // reference to open comment viewer backdrop, for toggle-close
-let searchMode       = false;
-let searchQuery      = "";
-let homeTweets       = null;
-let searchBanner     = null;
-let _searchResolve   = null;   // set while waiting for interceptor SearchTimeline response
-let monoW         = 8;
-let W             = window.innerWidth;
-let H             = window.innerHeight;
+let animPaused    = false;
+let viewerOpen    = false;
+let capturedAuth  = null;
+const queryIds    = {};
+let commentBackdrop = null;
+let searchMode    = false;
+let searchQuery   = "";
+let homeTweets    = null;
+let searchBanner  = null;
+let _searchResolve = null;
+let monoW = 8;
+let W     = window.innerWidth;
+let H     = window.innerHeight;
+
+// ─── BAND STATE ───────────────────────────────────────────────────────────────
+const BASE_VEL  = 0.6;   // px/frame base auto-scroll speed
+const TWEET_GAP = 28;    // px of breathing room after each tweet before the next head char
+const BAND_H    = 46;    // total pixel height of tweet band (single line + hints)
+const LINE_H    = 16;    // px between wrapped lines within a card
+let bandOffset      = 0;    // total px scrolled (increases as band moves left)
+let wheelVel        = 0;    // extra velocity from scroll wheel, decays each frame
+let selectedCard    = 0;    // index into orderedTweets of selected tweet
+let tweetOffsets    = [];   // parallel array: pixel x of each tweet's start from band origin
+let bandTotalWidth  = 0;    // sum of all tweet widths (px)
 
 // Populated by the MAIN-world interceptor via postMessage
 const videoUrlById  = new Map();  // id → best MP4 (or m3u8 fallback)
@@ -103,17 +109,6 @@ function cleanText(t) { return (t || "").replace(/\s+/g, " ").trim(); }
 function truncate(t, n) { return t.length <= n ? t : t.slice(0, n).trimEnd() + "…"; }
 function randGlyph() { return GLYPHS[Math.floor(Math.random() * GLYPHS.length)]; }
 
-function makeFallback() {
-  let s = "";
-  const len = 50 + Math.floor(Math.random() * 50);
-  for (let i = 0; i < len; i++) s += randGlyph();
-  return { text: s, heat: 1, isFallback: true, imageUrl: null, videoUrl: null };
-}
-
-function speedFor(heat) {
-  const b = CFG.SPEEDS[heat] || CFG.SPEEDS[1];
-  return b * (0.85 + Math.random() * 0.3);
-}
 
 // ─── TWEET EXTRACTION ─────────────────────────────────────────────────────────
 function scoreEngagement(article) {
@@ -202,63 +197,30 @@ function extractTweets() {
 
 function scrapeAndUpdate() {
   const fresh = extractTweets();
-  if (!fresh.length) return;
-  orderedTweets.push(...fresh);
-  syncRowTweets();
-}
-
-// ─── ROW MANAGEMENT ───────────────────────────────────────────────────────────
-
-// Returns the real tweet for this row slot, or null if slot is glyph territory
-function realTweetForRow(rowIdx) {
-  const abs = scrollIndex + rowIdx;
-  return (abs >= 0 && abs < orderedTweets.length) ? orderedTweets[abs] : null;
-}
-
-function buildRows() {
-  rows = [];
-  const count = Math.ceil(H / CFG.ROW_HEIGHT) + 1;
-
-  // First tweet anchored to CENTER row — glyphs fill top half, tweets fill bottom half
-  scrollIndex = -Math.floor(count / 2);
-
-  for (let i = 0; i < count; i++) {
-    const real  = realTweetForRow(i);
-    const tweet = real || makeFallback();
-    rows.push({
-      rowIdx:    i,
-      y:         i * CFG.ROW_HEIGHT + CFG.FONT_SIZE,
-      x:         W + 20 + Math.random() * 300 + i * 12,
-      speed:     speedFor(tweet.heat),
-      tweet,
-      textWidth: measureWidth(tweet.text),
-      mediaHit:  null,
-    });
+  if (fresh.length) {
+    orderedTweets.push(...fresh);
+    appendOffsets(fresh);
   }
 }
 
-// Update rows when orderedTweets grows or scrollIndex changes.
-// Fallback rows are left alone unless a real tweet is now available for that slot.
-function syncRowTweets() {
-  rows.forEach((row, i) => {
-    const real = realTweetForRow(i);
-    if (!real) {
-      // No real tweet — keep existing content (fallback stays, no churn)
-      // If we had a real tweet that scrolled out of range, swap back to a fallback
-      if (!row.tweet.isFallback) {
-        row.tweet     = makeFallback();
-        row.speed     = speedFor(1);
-        row.textWidth = measureWidth(row.tweet.text);
-      }
-      return;
-    }
-    // Real tweet available — install it if different from what's showing
-    if (real.text !== row.tweet.text) {
-      row.tweet     = real;
-      row.speed     = speedFor(real.heat);
-      row.textWidth = measureWidth(real.text);
-    }
-  });
+// Append offset entries for newly added tweets (called after push)
+function appendOffsets(tweets) {
+  for (const t of tweets) {
+    t._w = monoW + measureWidth(t.text.slice(1)) + TWEET_GAP;
+    tweetOffsets.push(bandTotalWidth);
+    bandTotalWidth += t._w;
+  }
+}
+
+// Rebuild entire offset table (call after orderedTweets is replaced wholesale)
+function rebuildOffsets() {
+  tweetOffsets   = [];
+  bandTotalWidth = 0;
+  for (const t of orderedTweets) {
+    if (!t._w) t._w = monoW + measureWidth(t.text.slice(1)) + TWEET_GAP;
+    tweetOffsets.push(bandTotalWidth);
+    bandTotalWidth += t._w;
+  }
 }
 
 // ─── ANIMATION LOOP ───────────────────────────────────────────────────────────
@@ -268,114 +230,123 @@ function animate() {
   if (animPaused) { requestAnimationFrame(animate); return; }
   frame++;
 
+  // Advance band position with velocity + momentum decay
+  wheelVel  *= 0.94;
+  const vel  = BASE_VEL + wheelVel;
+  bandOffset = Math.max(0, bandOffset + vel);
+
+  // Load more when within ~2 screen-widths of the end of loaded tweets
+  if (bandTotalWidth > 0 && bandOffset + W * 3 >= bandTotalWidth) {
+    window.scrollBy(0, 400);
+    const xc = findScrollContainer();
+    if (xc) xc.scrollTop += 400;
+  }
+
   tweetCtx.clearRect(0, 0, W, H);
   tweetCtx.font         = TWEET_FONT;
   tweetCtx.textBaseline = "alphabetic";
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    row.x -= row.speed;
+  const bandY = Math.floor(H / 2);
 
-    if (row.x + row.textWidth < 0) {
-      // Text scrolled off left — loop back from right
-      row.x = W + 20 + Math.random() * 60;
-      // On loop: check if a real tweet is now available for this slot
-      const real = realTweetForRow(row.rowIdx);
-      if (real && real.text !== row.tweet.text) {
-        row.tweet     = real;
-        row.speed     = speedFor(real.heat);
-        row.textWidth = measureWidth(real.text);
-      }
-    }
+  // Deco rows — scrolling fake-tweet glyphs filling top and bottom areas
+  tweetCtx.textBaseline = "alphabetic";
+  for (const row of decoRows) {
+    row.offset += row.speed;
+    if (row.offset >= row.textWidth) row.offset -= row.textWidth;
+    tweetCtx.globalAlpha = row.alpha;
+    tweetCtx.fillStyle   = HEAT_COLOR[row.heat] || HEAT_COLOR[1];
+    let sx = -(row.offset % row.textWidth);
+    for (let x = sx; x < W; x += row.textWidth) tweetCtx.fillText(row.text, x, row.y);
+  }
+  tweetCtx.globalAlpha = 1;
 
-    const text       = row.tweet.text;
-    const isSelected = i === selectedRowIdx && !row.tweet.isFallback;
-    const color      = isSelected ? "#ffffff" : (HEAT_COLOR[row.tweet.heat] || HEAT_COLOR[1]);
-
-    // Glow the selected row — double-draw for extra brightness
-    if (isSelected) {
-      tweetCtx.shadowColor = "#00ff55";
-      tweetCtx.shadowBlur  = 60;
-    }
-
-    const marker = text.includes("[VIDEO]") ? "[VIDEO]" : (text.includes("[IMAGE]") ? "[IMAGE]" : null);
-    const mIdx   = marker ? text.indexOf(marker) : -1;
-
-    function drawBody() {
-      if (mIdx > 0) {
-        tweetCtx.fillStyle = color;
-        tweetCtx.fillText(text.slice(1, mIdx), row.x + monoW, row.y);
-        tweetCtx.font      = BOLD_FONT;
-        tweetCtx.fillStyle = "#ffffff";
-        tweetCtx.fillText(marker, row.x + mIdx * monoW, row.y);
-        tweetCtx.font      = TWEET_FONT;
-      } else {
-        tweetCtx.fillStyle = color;
-        tweetCtx.fillText(text.slice(1), row.x + monoW, row.y);
-      }
-    }
-
-    drawBody();
-    if (isSelected) drawBody(); // second pass doubles glow intensity
-
-    // Flashing head character
-    const headOn = (frame + row.rowIdx) % 6 < 3;
-    tweetCtx.fillStyle = headOn ? "#ffffff" : (HEAD_STYLE[row.tweet.heat] || HEAD_STYLE[1]);
-    tweetCtx.fillText(headOn ? text[0] : randGlyph(), row.x, row.y);
-
-    if (isSelected) tweetCtx.shadowBlur = 0;
-
-    // Inline like/retweet hints trailing the selected tweet
-    if (isSelected) {
-      const endX    = row.x + row.textWidth + monoW;
-      tweetCtx.font = TWEET_FONT;
-      const likeStr = row.tweet.liked     ? " ♥"     : " ♥[1]";
-      const rtStr   = row.tweet.retweeted ? " ↺"     : " ↺[0]";
-      tweetCtx.fillStyle = row.tweet.liked     ? "#ff4466" : "rgba(180,180,180,0.75)";
-      tweetCtx.fillText(likeStr, endX, row.y);
-      tweetCtx.fillStyle = row.tweet.retweeted ? "#00ff55" : "rgba(180,180,180,0.75)";
-      tweetCtx.fillText(rtStr, endX + measureWidth(likeStr), row.y);
-      tweetCtx.fillStyle = "rgba(180,180,180,0.75)";
-      tweetCtx.fillText(" »[2]", endX + measureWidth(likeStr) + measureWidth(rtStr), row.y);
-    }
-
-    // Media hit region
-    if (marker && mIdx >= 0) {
-      row.mediaHit = {
-        x1: row.x + mIdx * monoW,
-        x2: row.x + (mIdx + marker.length) * monoW,
-        y1: row.y - CFG.FONT_SIZE,
-        y2: row.y + 3,
-      };
-    } else {
-      row.mediaHit = null;
-    }
+  if (orderedTweets.length === 0) {
+    tweetCtx.fillStyle = "rgba(0,200,60,0.5)";
+    tweetCtx.fillText("loading tweets…", 40, bandY);
+    requestAnimationFrame(animate);
+    return;
   }
 
-  // Check if cursor is hovering over a moving media tag
-  if (!viewerOpen && cursorX >= 0) {
-    let overTag = false;
-    for (const row of rows) {
-      const h = row.mediaHit;
-      if (!h) continue;
-      if (cursorX >= h.x1 && cursorX <= h.x2 && cursorY >= h.y1 && cursorY <= h.y2) {
-        overTag = true;
-        const t    = row.tweet;
-        const mp4      = t.tweetId ? videoUrlById.get(t.tweetId)  : null;
-        const m3u8     = t.tweetId ? videoM3u8ById.get(t.tweetId) : null;
-        const url      = mp4 || m3u8 || t.videoUrl || t.imageUrl;
-        const isVidTag = t.text.includes("[VIDEO]");
-        const type     = (isVidTag && (mp4 || m3u8 || (t.videoUrl && !t.videoUrl.includes("pbs.twimg.com"))))
-                         ? "video" : "img";
-        openMediaViewer(url, type, !mp4 && !!m3u8, t.text);
-        break;
-      }
+  // Binary search: find last tweet whose start <= bandOffset (first potentially visible)
+  let firstIdx = 0;
+  if (tweetOffsets.length > 1) {
+    let lo = 0, hi = tweetOffsets.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (tweetOffsets[mid] <= bandOffset) lo = mid; else hi = mid - 1;
     }
-    overlay.style.cursor = overTag ? "pointer" : "";
+    firstIdx = Math.max(0, lo);
+  }
+
+  for (let i = firstIdx; i < orderedTweets.length; i++) {
+    const tweet = orderedTweets[i];
+    const cardX = Math.floor((tweetOffsets[i] || 0) - bandOffset);
+    if (cardX > W) break;
+
+    const isSelected = i === selectedCard;
+    const color      = isSelected ? "#ffffff" : (HEAT_COLOR[tweet.heat] || HEAT_COLOR[1]);
+    const tw         = tweet._w || (monoW + measureWidth(tweet.text.slice(1)) + TWEET_GAP);
+
+    // Clip to this tweet's exact pixel width so nothing bleeds
+    tweetCtx.save();
+    tweetCtx.beginPath();
+    tweetCtx.rect(cardX, 0, tw, H);
+    tweetCtx.clip();
+
+    if (isSelected) {
+      tweetCtx.shadowColor = "#00ff55";
+      tweetCtx.shadowBlur  = 24;
+    }
+
+    // Full tweet body — no truncation, width is sized to fit
+    tweetCtx.fillStyle = color;
+    tweetCtx.fillText(tweet.text.slice(1), cardX + monoW, bandY);
+    if (isSelected) tweetCtx.fillText(tweet.text.slice(1), cardX + monoW, bandY);
+
+    // Flashing Matrix head character
+    const headOn = (frame + i) % 6 < 3;
+    tweetCtx.fillStyle = headOn ? "#ffffff" : (HEAD_STYLE[tweet.heat] || HEAD_STYLE[1]);
+    tweetCtx.fillText(headOn ? tweet.text[0] : randGlyph(), cardX, bandY);
+
+    if (isSelected) {
+      tweetCtx.shadowBlur = 0;
+      const hintsY   = bandY + LINE_H + 2;
+      const likeStr  = tweet.liked     ? " ♥"    : " ♥[1]";
+      const rtStr    = tweet.retweeted ? " ↺"    : " ↺[0]";
+      const mediaStr = (tweet.imageUrl || tweet.videoUrl ||
+                        videoUrlById.has(tweet.tweetId)  ||
+                        videoM3u8ById.has(tweet.tweetId)) ? " ▶[↵]" : "";
+      tweetCtx.fillStyle = tweet.liked     ? "#ff4466" : "rgba(180,180,180,0.75)";
+      tweetCtx.fillText(likeStr, cardX, hintsY);
+      tweetCtx.fillStyle = tweet.retweeted ? "#00ff55" : "rgba(180,180,180,0.75)";
+      tweetCtx.fillText(rtStr, cardX + measureWidth(likeStr), hintsY);
+      tweetCtx.fillStyle = "rgba(180,180,180,0.75)";
+      tweetCtx.fillText(" »[2]" + mediaStr, cardX + measureWidth(likeStr + rtStr), hintsY);
+    }
+
+    tweetCtx.restore();
+
+    // Subtle separator tick in the gap between tweets
+    tweetCtx.fillStyle = "rgba(0,180,60,0.22)";
+    tweetCtx.fillRect(cardX + tw - Math.floor(TWEET_GAP / 2), bandY - BAND_H / 2, 1, BAND_H);
   }
 
   requestAnimationFrame(animate);
 }
+
+// Hover over the band to select the card under the cursor
+overlay.addEventListener("mousemove", e => {
+  const bandY = Math.floor(H / 2);
+  if (Math.abs(e.clientY - bandY) > BAND_H / 2 + 10) return;
+  const absX = e.clientX + bandOffset;
+  // Binary search for tweet containing absX
+  let lo = 0, hi = tweetOffsets.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (tweetOffsets[mid] <= absX) lo = mid; else hi = mid - 1;
+  }
+  if (lo >= 0 && lo < orderedTweets.length && lo !== selectedCard) selectedCard = lo;
+});
 
 // ─── TWEET INTERACTION ────────────────────────────────────────────────────────
 
@@ -448,7 +419,7 @@ async function apiPost(queryId, operationName, variables, features = null) {
 }
 
 async function likeTweet() {
-  const tweet = rows[selectedRowIdx]?.tweet;
+  const tweet = orderedTweets[selectedCard];
   if (!tweet || tweet.isFallback || !tweet.tweetId) return;
   await ensureAuth();
   const op  = tweet.liked ? "UnfavoriteTweet" : "FavoriteTweet";
@@ -459,7 +430,7 @@ async function likeTweet() {
 }
 
 async function retweetTweet() {
-  const tweet = rows[selectedRowIdx]?.tweet;
+  const tweet = orderedTweets[selectedCard];
   if (!tweet || tweet.isFallback || !tweet.tweetId) return;
   await ensureAuth();
   const removing = tweet.retweeted;
@@ -473,19 +444,18 @@ async function retweetTweet() {
 }
 
 document.addEventListener("keydown", e => {
-  // These keys are handled before the viewerOpen guard so they work as toggles/closers
   if (e.key === "2") {
     if (commentBackdrop && document.contains(commentBackdrop)) {
       commentBackdrop.click();
     } else if (!viewerOpen) {
-      const tweet = rows[selectedRowIdx]?.tweet;
+      const tweet = orderedTweets[selectedCard];
       if (tweet && !tweet.isFallback) openCommentViewer(tweet);
     }
     return;
   }
   if (e.key === "r" || e.key === "R") {
     if (commentBackdrop && document.contains(commentBackdrop)) {
-      const tweetForReply = rows[selectedRowIdx]?.tweet;
+      const tweetForReply = orderedTweets[selectedCard];
       commentBackdrop.click();
       if (tweetForReply && !tweetForReply.isFallback) openComposeBox(tweetForReply);
     }
@@ -502,25 +472,40 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape" && searchMode) {
     orderedTweets.length = 0;
     orderedTweets.push(...homeTweets);
-    homeTweets  = null;
-    searchMode  = false;
-    searchQuery = "";
-    scrollIndex = 0;
-    buildRows();
+    homeTweets   = null;
+    searchMode   = false;
+    searchQuery  = "";
+    bandOffset   = 0;
+    selectedCard = 0;
+    rebuildOffsets();
     updateSearchBanner();
     return;
   }
-  if (viewerOpen) return;
-  if (e.key === "ArrowDown") {
-    selectedRowIdx = Math.min(rows.length - 1, selectedRowIdx < 0 ? Math.floor(rows.length / 2) : selectedRowIdx + 1);
-    while (selectedRowIdx < rows.length - 1 && rows[selectedRowIdx].tweet.isFallback) selectedRowIdx++;
-  } else if (e.key === "ArrowUp") {
-    selectedRowIdx = Math.max(0, selectedRowIdx < 0 ? Math.floor(rows.length / 2) : selectedRowIdx - 1);
-    while (selectedRowIdx > 0 && rows[selectedRowIdx].tweet.isFallback) selectedRowIdx--;
+  if (viewerOpen) {
+    if (e.key === "Enter") document.getElementById("mx-viewer")?.click();
+    return;
+  }
+  if (e.key === "ArrowRight") {
+    selectedCard      = Math.min(orderedTweets.length - 1, selectedCard + 1);
+    const selOff      = tweetOffsets[selectedCard] || 0;
+    const selW        = orderedTweets[selectedCard]?._w || 200;
+    if (selOff - bandOffset + selW > W) bandOffset = selOff - W + selW + 20;
+  } else if (e.key === "ArrowLeft") {
+    selectedCard      = Math.max(0, selectedCard - 1);
+    const selOff      = tweetOffsets[selectedCard] || 0;
+    if (selOff - bandOffset < 0) bandOffset = Math.max(0, selOff - 20);
   } else if (e.key === "1") {
     likeTweet();
   } else if (e.key === "0") {
     retweetTweet();
+  } else if (e.key === "Enter") {
+    const tweet = orderedTweets[selectedCard];
+    if (tweet && !tweet.isFallback) {
+      const mp4  = tweet.tweetId ? videoUrlById.get(tweet.tweetId)  : null;
+      const m3u8 = tweet.tweetId ? videoM3u8ById.get(tweet.tweetId) : null;
+      const url  = mp4 || m3u8 || tweet.videoUrl || tweet.imageUrl;
+      if (url) openMediaViewer(url, (tweet.videoUrl || mp4 || m3u8) ? "video" : "img", !mp4 && !!m3u8, tweet.text);
+    }
   }
 });
 
@@ -551,26 +536,10 @@ function findScrollContainer() {
   return null;
 }
 
-let lastWheel = 0;
 overlay.addEventListener("wheel", e => {
   e.preventDefault();
-  const now = Date.now();
-  if (now - lastWheel < 100) return;
-  lastWheel = now;
-
-  const dir    = e.deltaY > 0 ? 1 : -1;
-  const minIdx = -(rows.length - 1);
-  scrollIndex  = Math.max(minIdx, scrollIndex + dir);
-  syncRowTweets();
-
-  // Only drive X's scroll when we're within 2 screens of the end of loaded tweets —
-  // this triggers X's load-more without over-scrolling and losing the trigger zone.
-  const remaining = orderedTweets.length - 1 - scrollIndex;
-  if (dir > 0 && remaining < rows.length * 2) {
-    window.scrollBy(0, 400);
-    const xc = findScrollContainer();
-    if (xc) xc.scrollTop += 400;
-  }
+  const dir = e.deltaY > 0 ? 1 : -1;
+  wheelVel  = Math.max(-BASE_VEL - 12, Math.min(18, wheelVel + dir * 3.5));
 }, { passive: false });
 
 // ─── COMMENT VIEWER ───────────────────────────────────────────────────────────
@@ -1013,8 +982,9 @@ function openSearchBox() {
       searchQuery = q;
       orderedTweets.length = 0;
       orderedTweets.push(...results);
-      scrollIndex = 0;
-      buildRows();
+      bandOffset   = 0;
+      selectedCard = 0;
+      rebuildOffsets();
       updateSearchBanner();
       close();
     } catch (err) {
@@ -1092,11 +1062,6 @@ function openMediaViewer(url, type, forceHls = false, tweetText = "") {
   overlay.appendChild(backdrop);
 }
 
-// Track cursor so the animation loop can detect hover over moving tags
-overlay.addEventListener("mousemove", e => {
-  cursorX = e.clientX;
-  cursorY = e.clientY;
-});
 
 // ─── FULLSCREEN ───────────────────────────────────────────────────────────────
 let suppressResize = false;
@@ -1119,7 +1084,7 @@ window.addEventListener("resize", () => {
   resizeTimer = setTimeout(() => {
     W = window.innerWidth; H = window.innerHeight;
     tweetCanvas.width  = W; tweetCanvas.height = H;
-    buildRows();
+    bandOffset = 0;
     initRain();
   }, 200);
 });
@@ -1129,6 +1094,72 @@ const R_FONT  = '10px "Courier New",monospace';
 const R_ROW_H = 16;
 let rainRows = [];
 let rainTick = 0;
+let decoRows = [];
+
+function initDecoRows() {
+  decoRows = [];
+  const bandY    = Math.floor(H / 2);
+  const topEnd   = bandY - Math.floor(BAND_H / 2) - 6;
+  const botStart = bandY + Math.floor(BAND_H / 2) + 6;
+
+  const TIMESTAMPS = ["2m", "4m", "11m", "23m", "1h", "2h", "6h", "14h", "just now"];
+
+  function randWord(len) {
+    const l = len || (2 + Math.floor(Math.random() * 8));
+    let w = "";
+    for (let i = 0; i < l; i++) w += GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
+    return w;
+  }
+
+  function makeDecoText() {
+    const rt     = Math.random() < 0.18 ? "RT " : "";
+    const handle = "@" + randWord(3 + Math.floor(Math.random() * 7));
+    const ts     = TIMESTAMPS[Math.floor(Math.random() * TIMESTAMPS.length)];
+
+    // Body — 5-12 glyph words, each 2-9 chars, space-separated like real tweet words
+    const wCount = 5 + Math.floor(Math.random() * 8);
+    const words  = [];
+    for (let i = 0; i < wCount; i++) words.push(randWord());
+
+    // Sprinkle a hashtag roughly 1 in 3 tweets
+    if (Math.random() < 0.33) {
+      const pos = 1 + Math.floor(Math.random() * (words.length - 1));
+      words.splice(pos, 0, "#" + randWord(2 + Math.floor(Math.random() * 6)));
+    }
+
+    const body = words.join(" ");
+
+    // Engagement metrics at the end — makes it look like a real tweet row
+    const likes = Math.random() < 0.5
+      ? `  ${(Math.floor(Math.random() * 9000) + 10).toLocaleString()} ♥` : "";
+    const rts   = Math.random() < 0.35
+      ? `  ${(Math.floor(Math.random() * 999) + 1)} ↺` : "";
+    const tag   = Math.random() < 0.11 ? " [VIDEO]"
+                : Math.random() < 0.09 ? " [IMAGE]" : "";
+
+    return `${rt}${handle} · ${body} · ${ts}${likes}${rts}${tag}   `;
+  }
+
+  function addRow(y) {
+    const speed     = 0.15 + Math.random() * 2.0;  // wide random spread
+    const alpha     = 0.55 + Math.random() * 0.42;  // near-full brightness, like center row
+    const heatIdx   = Math.ceil(Math.random() * 4);
+    const text      = makeDecoText();
+    const textWidth = Math.max(1, measureWidth(text));
+    decoRows.push({ y, offset: Math.random() * textWidth, speed, text, textWidth, heat: heatIdx, alpha });
+  }
+
+  let r = 0;
+  for (let y = topEnd - Math.floor(LINE_H / 2); y > LINE_H; y -= LINE_H) {
+    addRow(y);
+    if (++r > 50) break;
+  }
+  r = 0;
+  for (let y = botStart + LINE_H; y < H - LINE_H / 2; y += LINE_H) {
+    addRow(y);
+    if (++r > 50) break;
+  }
+}
 
 function initRain() {
   rainCanvas.width  = W;
@@ -1139,6 +1170,7 @@ function initRain() {
   }));
   rainCtx.fillStyle = "#000";
   rainCtx.fillRect(0, 0, W, H);
+  initDecoRows();
 }
 
 function animateRain() {
@@ -1202,9 +1234,39 @@ function measureWidth(text) {
   return tweetCtx.measureText(text).width;
 }
 
-buildRows();
-selectedRowIdx = Math.floor(rows.length / 2);
-discoverFromScripts();   // eagerly scan for Bearer token + queryIds
+// Truncate text to fit maxPx, always preserving trailing [VIDEO]/[IMAGE] tag
+function fitText(text, maxPx) {
+  if (measureWidth(text) <= maxPx) return text;
+  const tagM = text.match(/( \[(?:VIDEO|IMAGE)\])$/);
+  const tag  = tagM ? tagM[1] : "";
+  const base = tag ? text.slice(0, -tag.length) : text;
+  const tail = "…" + tag;
+  const tailW = measureWidth(tail);
+  let s = base;
+  while (s.length > 0 && measureWidth(s) + tailW > maxPx) s = s.slice(0, -1);
+  return s + tail;
+}
+
+function wrapText(text, maxWidth) {
+  const words = text.split(" ");
+  const lines = [];
+  let line = "";
+  for (const word of words) {
+    const test = line ? line + " " + word : word;
+    if (measureWidth(test) > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.slice(0, 4);
+}
+
+selectedCard = 0;
+bandOffset   = 0;
+discoverFromScripts();
 startObserver();
 requestAnimationFrame(animate);
 initRain();
