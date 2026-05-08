@@ -1,3 +1,4 @@
 hls.min.js
 *.png
 .claude/
+!CLAUDE.md
