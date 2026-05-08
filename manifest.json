@@ -4,9 +4,7 @@
   "version": "0.1.0",
   "description": "Transform X.com into the Matrix. Live tweets stream as glowing green code across a digital void. Jack into the simulation.",
   "icons": {
-    "16": "icon16.png",
-    "48": "icon48.png",
-    "128": "icon128.png"
+    "16": "icons/icon16.png"
   },
   "permissions": [
     "scripting"
