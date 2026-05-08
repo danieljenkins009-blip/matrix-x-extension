@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Icons are now committed to the repo under `icons/`. Only `icons/icon16.png` is shipped; `icon48.png` and `icon128.png` references were removed from `manifest.json`.
+
 ## [0.1.2] — 2026-05-03
 
 Dans Initial MVP

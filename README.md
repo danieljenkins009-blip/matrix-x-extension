@@ -38,19 +38,15 @@ To make API calls, the content script discovers the page's `Bearer` token and pe
 
 ## Installing locally
 
-### 1. Get the missing assets
+### 1. Get the missing asset
 
-Two files referenced by the extension are gitignored and must be obtained separately before loading:
-
-**`hls.min.js`** — the [hls.js](https://github.com/video-dev/hls.js) library, used to play HLS video streams from X. Without it, video playback will fail silently on Chrome. (Safari's native HLS support means MP4 fallback can work without it, but Chrome cannot.)
+`hls.min.js` is gitignored and must be obtained separately before loading. It's the [hls.js](https://github.com/video-dev/hls.js) library, used to play HLS video streams from X. Without it, video playback will fail silently on Chrome. (Safari's native HLS support means MP4 fallback can work without it, but Chrome cannot.)
 
 Download a release build and save it as `hls.min.js` in the project root:
 
 ```sh
 curl -L -o hls.min.js https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js
 ```
-
-**Extension icons** — `icon16.png`, `icon48.png`, `icon128.png` are referenced in `manifest.json` but not committed. Provide your own, or remove the `icons` block from `manifest.json` if you don't care about the toolbar icon.
 
 ### 2. Load the extension into Chrome
 
@@ -75,7 +71,7 @@ styles.css        Overlay styling; hides the underlying X UI
 interceptor.js    MAIN-world fetch/XHR hook; extracts video URLs + queryIds
 hlsplayer.js      MAIN-world HLS attachment helper
 hls.min.js        (gitignored) hls.js library — see step 1
-icon{16,48,128}.png   (gitignored) toolbar icons
+icons/icon16.png  toolbar icon
 ```
 
 ## A note on X's API
